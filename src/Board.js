@@ -9,10 +9,11 @@ export default class Board extends React.Component {
     super(props);
     const clients = this.getClients();
     this.state = {
+      // Ticket: every task starts in the backlog, regardless of seed status
       clients: {
-        backlog: clients.filter(client => !client.status || client.status === 'backlog'),
-        inProgress: clients.filter(client => client.status && client.status === 'in-progress'),
-        complete: clients.filter(client => client.status && client.status === 'complete'),
+        backlog: clients.map(client => ({ ...client, status: 'backlog' })),
+        inProgress: [],
+        complete: [],
       }
     }
     this.swimlanes = {
@@ -21,6 +22,55 @@ export default class Board extends React.Component {
       complete: React.createRef(),
     }
   }
+  componentDidMount() {
+    this.drake = Dragula([
+      this.swimlanes.backlog.current,
+      this.swimlanes.inProgress.current,
+      this.swimlanes.complete.current,
+    ]);
+    this.drake.on('drop', (el, target, source, sibling) => this.updateClient(el, target, source, sibling));
+  }
+
+  componentWillUnmount() {
+    if (this.drake) this.drake.destroy();
+  }
+
+  laneKeyFor(element) {
+    return Object.keys(this.swimlanes).find(key => this.swimlanes[key].current === element);
+  }
+
+  updateClient(el, target, source, sibling) {
+    // Dragula already moved the DOM node. Put it back so React stays the
+    // single source of truth, then re-render from state.
+    this.drake.cancel(true);
+
+    const fromKey = this.laneKeyFor(source);
+    const toKey = this.laneKeyFor(target);
+    if (!fromKey || !toKey) return;
+
+    const statusFor = { backlog: 'backlog', inProgress: 'in-progress', complete: 'complete' };
+    const id = el.dataset.id;
+    const siblingId = sibling ? sibling.dataset.id : null;
+
+    this.setState(prev => {
+      const lanes = {
+        backlog: [...prev.clients.backlog],
+        inProgress: [...prev.clients.inProgress],
+        complete: [...prev.clients.complete],
+      };
+      const fromIndex = lanes[fromKey].findIndex(c => c.id === id);
+      if (fromIndex === -1) return null;
+      const [moved] = lanes[fromKey].splice(fromIndex, 1);
+      const updated = { ...moved, status: statusFor[toKey] };
+
+      const insertAt = siblingId ? lanes[toKey].findIndex(c => c.id === siblingId) : -1;
+      if (insertAt === -1) lanes[toKey].push(updated);
+      else lanes[toKey].splice(insertAt, 0, updated);
+
+      return { clients: lanes };
+    });
+  }
+
   getClients() {
     return [
       ['1','Stark, White and Abbott','Cloned Optimal Architecture', 'in-progress'],
